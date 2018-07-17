@@ -11,7 +11,7 @@ from picamera import PiCamera
 from picamera.array import PiRGBArray
 import threading, thread
 
-host = '172.20.10.12' #'192.168.129.126'
+host = '192.168.129.126'
 port = 5002
 
 # Possible commandline arguments
