@@ -16,7 +16,7 @@ for i,argument in enumerate(argv):
     if argument in '--images_path':
         images_path = str(argv[i+1])
 
-    if argument in '--create_images':
+    if argument in ('-ci','--create_images'):
         # Config parameters
         images_path = "calib_data/"
         create_images = True
@@ -24,7 +24,7 @@ for i,argument in enumerate(argv):
         if not os.path.exists(images_path):
             os.makedirs(images_path)
         else:
-            answer = input("Delete all calibrate images? (y/n): ")
+            answer = raw_input("Delete all calibrate images? (y/n): ")
             if answer is "y":
                 shutil.rmtree(images_path)
                 os.makedirs(images_path)
@@ -91,12 +91,11 @@ if images_path is not None:
             #cv2.imwrite(fname_new, img)
             #print "Img number: %d" % i+1
             #key = cv2.waitKey(100) & 0xFF
-            #if key == ord("q"):
-            #    break
+             
 
     cv2.destroyAllWindows()
     ret, cam_mat, distcoeff, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, imshape[::-1], None, None)
-    save_mat = input("Save camera matrix and distortions parameters: ")
+    save_mat = raw_input("Save camera matrix and distortions parameters: ")
     if save_mat is "y":
         csv_cam_mat = open("cam_mat.csv",'w')
         csv_dist_coeff = open("dist_coeff.csv",'w')
