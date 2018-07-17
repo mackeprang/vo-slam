@@ -12,9 +12,8 @@ figure
 hold on
 p = plot3(x_vec,y_vec,z_vec,'.')
 p_new = plot3(x_vec,y_vec,z_vec,'*')
-axis([-10 10 -10 10 -10 10])
-%view(20,14)
-while length(x_vec) <1000 
+axis([-10 10 -10 10])
+while length(x_vec) <100 
     tic;
     while ~t.BytesAvailable
         if toc>5
@@ -26,12 +25,12 @@ while length(x_vec) <1000
         data = char(fread(t,t.BytesAvailable)');
     end
     [x,y,z] = parseData(data);
-    set(p,'XData',x_vec,'YData',y_vec,'ZData',z_vec)
-    set(p_new,'XData',x(end),'YData',y(end),'ZData',z(end))
+    set(p,'XData',z_vec,'YData',y_vec,'ZData',z_vec)
+    set(p_new,'XData',z(end),'YData',y(end),'ZData',z(end))
     x_vec = [x_vec,x];
     y_vec = [y_vec,y];
     z_vec = [z_vec,z];
-    pause(0.1)
+    pause(0.2)
     clc
     disp("Samples:")
     disp(length(x_vec))
