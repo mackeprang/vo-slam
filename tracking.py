@@ -10,8 +10,9 @@ import RPi.GPIO as GPIO
 from picamera import PiCamera
 from picamera.array import PiRGBArray
 import threading, thread
+import math
 
-host = '192.168.129.126' # test
+host = '192.168.129.126'
 port = 5002
 
 # Possible commandline arguments
@@ -55,7 +56,7 @@ good_feature_params = dict(maxCorners = 2000,
 
 optical_flow_params = dict(winSize = (15,15),
                            maxLevel = 3,
-                           criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
+                           criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01))
 
 class TCP_server(threading.Thread):
     def __init__(self,host,port,name):
@@ -92,7 +93,7 @@ class TCP_server(threading.Thread):
                     conn = None
                     print(e)
                     pass
-                time.sleep(0.5)
+                time.sleep(0.1)
         print "Exiting " + self.name
         if conn is not None:
             conn.close()
@@ -163,12 +164,26 @@ def sparse_optical_flow(img1,img2,points,fb_threshold,optical_flow_params):
     return new_points,old_points
 
 def update_motion(points1,points2,Rpos,tpos,cam_mat=None,scale = 1.0):
-    E, mask = cv2.findEssentialMat(points1,points2,cameraMatrix=cam_mat,method=cv2.LMEDS,prob=0.999, mask=None)
+    E, mask = cv2.findEssentialMat(points1,points2,cameraMatrix=cam_mat,method=cv2.RANSAC,prob=0.999, mask=None)
     newmask = np.copy(mask)
     _,R,t,newmask = cv2.recoverPose(E,points1,points2,cameraMatrix=cam_mat,mask=newmask)
-    tp = tpos+np.dot(Rpos,t*scale)
+    tp = tpos+np.dot(Rpos,t)*scale
     Rp = np.dot(R,Rpos)
     return Rp,tp,mask
+
+def get_scale(p1,p2):
+    scale = 0
+    p1 = np.reshape(p1,(-1 , 2))
+    p2 = np.reshape(p2,(-1 , 2))
+    for i, (new, old) in enumerate(zip(p1, p2)):
+        x1, y1 = new.ravel()
+        x2, y2 = old.ravel()
+        xd = x2-x1
+        yd = y2-y1
+        scale += math.sqrt(xd*xd+yd*yd)
+    scale = (scale/len(p1))*0.1
+    return scale
+        
 
 ###### VISUEL ODOMETRY ######
 ## Initialization of parameters
@@ -184,7 +199,7 @@ camera = PiCamera(resolution=camera_resolution)
 stream  = PiRGBArray(camera,size=camera_resolution)
 time.sleep(2)
 key = ''
-scale = 0
+scale = 0.1
 fps = FPS().start()
 t1 = None
 t2 = None
@@ -201,13 +216,15 @@ try:
         stream.truncate()
         stream.seek(0)
         frame = stream.array
-        if t1 is not None:
-            t2 = time.time()
-            print "Loading a picture takes: " + str(t2-t1)
         frame = cv2.flip(frame,-1)
         gray = cv2.cvtColor(frame,cv2.COLOR_BGR2GRAY)
-        if cv2.waitKey(20) & 0xFF == ord('q'):
+        key = cv2.waitKey(2)
+        if key & 0xFF == ord('q'):
             break
+        if key & 0xFF == ord('r'):
+            print("Reset position")
+            Rpos = np.eye(3,3,dtype=np.float32)
+            tpos = np.zeros((3,1),dtype=np.float32)
 
         if prev_frame is None:
             prev_frame = gray.copy()
@@ -237,11 +254,11 @@ try:
             stream.truncate()
             stream.seek(0)
             continue
-        P1 = np.dot(cam_mat,np.hstack((Rpos,tpos)))
-        Rpos,tpos,mask = update_motion(prev_points,new_points,Rpos,tpos,cam_mat)
+        old_tpos = np.copy(tpos)
+        P1 = np.dot(cam_mat,np.hstack((Rpos,old_tpos)))
+        Rpos,tpos,mask = update_motion(prev_points,new_points,Rpos,old_tpos,cam_mat,get_scale(prev_points,new_points))
         if threads:
             try:
-
                 thr1.send_data(tpos)
             except Exception as e:
                 print(e)

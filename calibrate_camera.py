@@ -30,8 +30,9 @@ for i,argument in enumerate(argv):
                 os.makedirs(images_path)
 
 if create_images:
-    with PiCamera(resolution=(640,480),framerate = 24) as camera:
-        with PiRGBArray(camera,size=(640,480)) as stream:
+    camera_resolution=(640/2,480/2)
+    with PiCamera(resolution=camera_resolution,framerate = 24) as camera:
+        with PiRGBArray(camera,size=camera_resolution) as stream:
             time.sleep(2)
             for frame in camera.capture_continuous(stream,format='bgr',use_video_port=True):
                 stream.truncate()
@@ -40,12 +41,14 @@ if create_images:
                     img_count += 1
                     continue
                 img = frame.array
+                img = cv2.flip(img,-1)
                 cv2.imshow("Calibrate Image",img)
-                if cv2.waitKey(20) == 32: # Space
-                    img_count += 1
-                    print("Image number: {}".format(img_count))
-                    img_name = images_path+"img%.2d" % img_count + ".png"
-                    cv2.imwrite(img_name, img)
+                #if cv2.waitKey(20) == 32: # Space
+                time.sleep(2)
+                img_count += 1
+                print("Image number: {}".format(img_count))
+                img_name = images_path+"img%.2d" % img_count + ".png"
+                cv2.imwrite(img_name, img)
                 stream.truncate(0)
                 if img_count == 60 or cv2.waitKey(20) == ord('q'):
                     break
