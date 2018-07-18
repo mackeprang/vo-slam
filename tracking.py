@@ -5,6 +5,7 @@ from pathlib import Path
 from sys import argv
 from imutils.video import FPS
 import numpy as np
+from numpy.linalg import norm
 import multiprocessing as mul
 import RPi.GPIO as GPIO
 from picamera import PiCamera
@@ -12,8 +13,9 @@ from picamera.array import PiRGBArray
 import threading, thread
 import math
 import netifaces as ni
+import smbus
 
-host = '192.168.129.126'
+host = 'localhost'
 port = 5002
 
 # Possible commandline arguments
@@ -23,7 +25,8 @@ display_flow = False
 print_fps = False
 data_ready = False
 start_server = False
-
+with_imu = False
+threadLock = threading.Lock()
 backward_flow_threshold = 3
 for i, argument in enumerate(argv):
     if argument in '--verbose':
@@ -44,8 +47,9 @@ for i, argument in enumerate(argv):
             port = int(argv[i+1])
         else:
             print "Port number has to be between 4000 - 6000. \nUsing default portnumber: " + str(port)
+    if argument in '--imu':
+        with_imu = True
         
-
 # Configuration parameters:
 camera_resolution = (320,240)
 
@@ -111,7 +115,92 @@ class TCP_server(threading.Thread):
             self.data = data
             self.data_ready = True
             
+class IMU(threading.Thread):
+    def __init__(self,loop_time=0.001,name='imu_thread'):
+        threading.Thread.__init__(self)
+        self.loop_time = loop_time
+        self.stop = False
+        self.speed = np.array([[0],[0],[0]])
+        self.data = np.array([[0],[0],[0]])
+        self.data_ready = False
+        self.name = name
+        self.vel = 0.0
+        self.i2c = smbus.SMBus(1)
+        self.IMU_ADDRESS             = 0x68
+        self.MPU9150_PWR_MGMT_1      = 0x6B
+        self.MPU9150_GYRO_CONFIG     = 0x1B
+        self.MPU9150_ACCEL_CONFIG    = 0x1C
+        self.ACCEL_OUT               = 0x3B
+        self.init = self.init()
+        self.bias = np.array([[0],[0],[0]])
+        self.bias = self.calibrate()
 
+    def init(self):
+        try:
+            self.i2c.write_byte_data(self.IMU_ADDRESS,self.MPU9150_PWR_MGMT_1,0x00)
+            time.sleep(2)
+            self.i2c.write_byte_data(self.IMU_ADDRESS,self.MPU9150_GYRO_CONFIG,0x00)
+            time.sleep(0.1)
+            self.i2c.write_byte_data(self.IMU_ADDRESS,self.MPU9150_ACCEL_CONFIG,0x00)
+            time.sleep(0.1)
+            return True
+        except:
+            return False
+
+    def run(self):
+        if not self.init:
+            return False
+        print("Starting IMU")
+        t_start = time.clock()
+        old_data = np.subtract(self.read_data(),self.bias)
+        old_vel = 0
+        alpha = 0.8
+        while not self.stop:
+            t_end = time.clock()
+            if t_end-t_start > self.loop_time:
+                threadLock.acquire(1)
+                t_start = t_end
+                self.data = np.subtract(self.read_data(),self.bias)
+                acc = np.subtract(old_data,self.data)
+                self.speed = np.add(self.speed, np.dot(acc,time.clock()-t_start))
+                self.vel = norm(self.speed)
+                self.vel = alpha*self.vel +(1-alpha)*old_vel
+                old_vel = self.vel
+                old_data = self.data
+                print("Current speed is: {:.4f}".format(float(self.vel)))
+                threadLock.release()
+        
+    def read_data(self,n=10):
+        acc = np.array([[0],[0],[0]])
+        for i in range(n):
+            data = self.i2c.read_i2c_block_data(self.IMU_ADDRESS,self.ACCEL_OUT,6)
+            acc_x = (self.data_conv(data[1],data[0])/16384.0)
+            acc_y = (self.data_conv(data[3],data[2])/16384.0)
+            acc_z = (self.data_conv(data[5],data[4])/16384.0)
+            acc = np.add(acc,np.array([[acc_x],[acc_y],[acc_z]]))
+        return np.divide(acc,n)
+
+    def calibrate(self,n=20000):
+        if not self.init:
+            return False
+        print("Calibrating the IMU, {} iterations".format(n))
+        bias = np.array([[0],[0],[0]])
+        for i in range(n):
+            data = self.i2c.read_i2c_block_data(self.IMU_ADDRESS,self.ACCEL_OUT,6)
+            acc = self.read_data(n=1)
+            bias = np.add(bias,acc)
+        print("Calibration done")
+        return np.divide(bias,n)
+
+    def data_conv(self,data1,data2):
+        value = data1 | (data2 << 8)
+        if (value & (1 << 16 -1)):
+            value -= (1<<16)
+        return value
+    
+    def get_speed_imu():
+        return self.vel
+        
 # Methods
 def find_3d_points(Q1,P1,Q2,P2):
     Q1 = np.reshape(Q1,(-1 , 2))
@@ -216,6 +305,12 @@ if start_server:
     thr1 = TCP_server(host,port,"server")
     thr1.start()
     threads.append(thr1)
+
+if with_imu:
+    print("Starting IMU thread.")
+    thr2 = IMU()
+    thr2.start()
+    threads.append(thr2)
     
 ## Starting Visual odometry
 print("Starting VO")
@@ -265,7 +360,7 @@ try:
         old_tpos = np.copy(tpos)
         P1 = np.dot(cam_mat,np.hstack((Rpos,old_tpos)))
         Rpos,tpos,mask = update_motion(prev_points,new_points,Rpos,old_tpos,cam_mat,get_scale(prev_points,new_points))
-        if threads:
+        if start_server:
             try:
                 thr1.send_data(tpos)
             except Exception as e:
@@ -319,6 +414,7 @@ if threads: #No threads started
     for t in threads:
         t.stop = True
         t.join()
+        print("Terminating: {}".format(t.name))
     
 print("Program ended.")
 if save_3d_points:
