@@ -14,7 +14,7 @@ p = plot3(x_vec,y_vec,z_vec,'.')
 p_new = plot3(x_vec,y_vec,z_vec,'*')
 axis([-10 10 -10 10 -10 10])
 %view(20,14)
-while length(x_vec) <1000 
+while (1) 
     tic;
     while ~t.BytesAvailable
         if toc>5
@@ -25,7 +25,10 @@ while length(x_vec) <1000
     if t.BytesAvailable
         data = char(fread(t,t.BytesAvailable)');
     end
-    [x,y,z] = parseData(data);
+    [x,y,z,err] = parseData(data);
+    if err 
+        break
+    end
     set(p,'XData',x_vec,'YData',y_vec,'ZData',z_vec)
     set(p_new,'XData',x(end),'YData',y(end),'ZData',z(end))
     x_vec = [x_vec,x];
@@ -40,7 +43,15 @@ end
 disp("Port closed")
 fclose(t)
 
-function [x,y,z] = parseData(data)
+function [x,y,z,err] = parseData(data)
+    err = false;
+    if contains(data,'q')
+        err = true;
+        x = [];
+        y = [];
+        z = [];
+        return
+    end
     data = sscanf(data,'%f',[3 inf])';
     x = data(:,1)';
     y = data(:,2)';
