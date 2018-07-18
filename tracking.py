@@ -11,6 +11,7 @@ from picamera import PiCamera
 from picamera.array import PiRGBArray
 import threading, thread
 import math
+import netifaces as ni
 
 host = '192.168.129.126'
 port = 5002
@@ -23,7 +24,7 @@ print_fps = False
 data_ready = False
 start_server = False
 
-backward_flow_threshold = 1
+backward_flow_threshold = 3
 for i, argument in enumerate(argv):
     if argument in '--verbose':
         verbose = True
@@ -46,7 +47,7 @@ for i, argument in enumerate(argv):
         
 
 # Configuration parameters:
-camera_resolution = (640/2,480/2)
+camera_resolution = (320,240)
 
 good_feature_params = dict(maxCorners = 2000,
                            qualityLevel = 0.01,
@@ -54,9 +55,9 @@ good_feature_params = dict(maxCorners = 2000,
                            blockSize = 3,
                            useHarrisDetector = False)
 
-optical_flow_params = dict(winSize = (15,15),
-                           maxLevel = 3,
-                           criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01))
+optical_flow_params = dict(winSize = (10,10),
+                           maxLevel = 2,
+                           criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.01))
 
 class TCP_server(threading.Thread):
     def __init__(self,host,port,name):
@@ -65,17 +66,17 @@ class TCP_server(threading.Thread):
         self.data = []
         self.data_ready = False
         self.name = name
-        self.host = host
-        self.port = port
         self.sock = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+        self.host = ni.ifaddresses('wlan0')[ni.AF_INET][0]['addr']
+        self.port = port
         self.sock.bind((self.host,self.port))
         
     def run(self):
         conn = None
         self.sock.listen(1)
         self.sock.settimeout(1)
-        print("TCP Online. Waiting for a connection.")
-        while not self.stop:
+        print("TCP Online. Waiting for a connection. ip address: {}".format(self.host))
+        while True:
             if conn is None:
                 try:
                     conn, addr = self.sock.accept()
@@ -93,7 +94,14 @@ class TCP_server(threading.Thread):
                     conn = None
                     print(e)
                     pass
-                time.sleep(0.1)
+                
+            if self.stop:
+                try:
+                    conn.send('q')
+                finally:
+                    time.sleep(1)
+                    break
+            time.sleep(0.1)
         print "Exiting " + self.name
         if conn is not None:
             conn.close()
@@ -238,7 +246,7 @@ try:
             print("Number of found feature: {}".format(min_features))
             continue
 
-        if len(prev_points)<min_features*0.8 or len(prev_points)<50:
+        if len(prev_points)<min_features*0.5 or len(prev_points)<50:
             prev_points = cv2.goodFeaturesToTrack(prev_frame, mask=None, **good_feature_params)
             try:
                 min_features = len(prev_points)
@@ -281,7 +289,7 @@ try:
                                (int(flow_img.shape[1]//100),
                                 int(flow_img.shape[0]//10)),
                                cv2.FONT_HERSHEY_SIMPLEX,
-                               flow_img.shape[1]/(640*1.4),
+                               flow_img.shape[1]/(640*1.1),
                                (0,255,0),2)
 
             cv2.imshow('Flow_img', flow_img)
