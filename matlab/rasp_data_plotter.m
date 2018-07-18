@@ -5,7 +5,7 @@ x_vec = 0;
 y_vec = 0;
 z_vec = 0;
 time_vec = [];
-t = tcpip('192.168.129.126',5004)
+t = tcpip('192.168.129.126',5002)
 %t = tcpip('172.20.10.12',5002)
 fopen(t)
 figure
