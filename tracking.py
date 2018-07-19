@@ -91,6 +91,8 @@ class TCP_server(threading.Thread):
                 try:
                     if self.data_ready:
                         self.data_ready = False
+##                        t,x,y,z = self.data
+##                        data = '{0:.5f} {1:.3f} {2:.3f} {3:.3f}\n'.format(float(t),float(x),float(y),float(z))
                         x,y,z = self.data
                         data = '{0:.3f} {1:.3f} {2:.3f}\n'.format(float(x),float(y),float(z))
                         conn.send(data)
@@ -112,16 +114,18 @@ class TCP_server(threading.Thread):
         self.sock.close()
         
     def send_data(self,data):
-            self.data = data
-            self.data_ready = True
+        self.data = data
+        self.data_ready = True
             
 class IMU(threading.Thread):
     def __init__(self,loop_time=0.001,name='imu_thread'):
         threading.Thread.__init__(self)
         self.loop_time = loop_time
+        self.time_const = 0.001
         self.stop = False
-        self.speed = np.array([[0],[0],[0]])
+        self.gravity = np.array([[0],[0],[0]])
         self.data = np.array([[0],[0],[0]])
+        self.speed = np.array([[0],[0],[0]])
         self.data_ready = False
         self.name = name
         self.vel = 0.0
@@ -152,44 +156,62 @@ class IMU(threading.Thread):
             return False
         print("Starting IMU")
         t_start = time.clock()
-        old_data = np.subtract(self.read_data(),self.bias)
-        old_vel = 0
-        alpha = 0.8
+        t_diff = 0.0
+        t_diff_start = 0.0
         while not self.stop:
             t_end = time.clock()
-            if t_end-t_start > self.loop_time:
-                threadLock.acquire(1)
-                t_start = t_end
-                self.data = np.subtract(self.read_data(),self.bias)
-                acc = np.subtract(old_data,self.data)
-                self.speed = np.add(self.speed, np.dot(acc,time.clock()-t_start))
-                self.vel = norm(self.speed)
-                self.vel = alpha*self.vel +(1-alpha)*old_vel
-                old_vel = self.vel
-                old_data = self.data
-                print("Current speed is: {:.4f}".format(float(self.vel)))
-                threadLock.release()
-        
-    def read_data(self,n=10):
+            try:
+                if t_end-t_start > self.loop_time:
+                    t_start = time.clock()
+                    self.data = self.read_data()
+                    t_diff = time.clock()-t_diff_start
+                    t_diff_start = time.clock()
+                    alpha = self.time_const/(self.time_const+t_diff)
+                    self.gravity = np.add(alpha*self.gravity, (1-alpha)*self.data)
+                    acc = np.subtract(self.data,self.gravity)
+                    acc = np.add(acc,self.bias)
+                    self.speed = np.add(self.speed, acc*t_diff)
+                    vel = norm(self.speed)
+                    self.vel = 0.5*vel + (1-0.5)*self.vel
+            except Exception as e:
+                print(e)
+                break
+            time.sleep(0.0001)
+            
+    def read_data(self,n=3):
         acc = np.array([[0],[0],[0]])
         for i in range(n):
             data = self.i2c.read_i2c_block_data(self.IMU_ADDRESS,self.ACCEL_OUT,6)
-            acc_x = (self.data_conv(data[1],data[0])/16384.0)
-            acc_y = (self.data_conv(data[3],data[2])/16384.0)
-            acc_z = (self.data_conv(data[5],data[4])/16384.0)
+            acc_x = (self.data_conv(data[1],data[0])/16384.0)*9.82
+            acc_y = (self.data_conv(data[3],data[2])/16384.0)*9.82
+            acc_z = (self.data_conv(data[5],data[4])/16384.0)*9.82
             acc = np.add(acc,np.array([[acc_x],[acc_y],[acc_z]]))
         return np.divide(acc,n)
 
-    def calibrate(self,n=20000):
+    def calibrate(self,n=2000):
         if not self.init:
             return False
         print("Calibrating the IMU, {} iterations".format(n))
         bias = np.array([[0],[0],[0]])
-        for i in range(n):
-            data = self.i2c.read_i2c_block_data(self.IMU_ADDRESS,self.ACCEL_OUT,6)
-            acc = self.read_data(n=1)
-            bias = np.add(bias,acc)
+        gravity = np.array([[0],[0],[0]])
+        t_start = time.clock()
+        t_diff_start = 0.0
+        count = 0
+        while count <= n:
+            t_end = time.clock()
+            if t_end-t_start > self.loop_time:
+                count = count+1
+                t_start = time.clock()
+                acc = self.read_data(n=3)
+                t_diff = time.clock()-t_diff_start
+                t_diff_start = time.clock()
+                alpha = self.time_const/(self.time_const+t_diff)
+                gravity = np.add(np.dot(alpha,gravity), np.dot((1-alpha),acc))
+                bias = np.add(bias,np.subtract(acc,gravity))
         print("Calibration done")
+        print(np.divide(bias,n))
+        #print(np.divide(gravity,n))
+        #print(t_diff)
         return np.divide(bias,n)
 
     def data_conv(self,data1,data2):
@@ -198,7 +220,7 @@ class IMU(threading.Thread):
             value -= (1<<16)
         return value
     
-    def get_speed_imu():
+    def get_speed_imu(self):
         return self.vel
         
 # Methods
@@ -349,6 +371,7 @@ try:
                 prev_points = []
                 prev_frame = gray.copy()
                 continue
+            
             print("Updating number of feature: {}".format(min_features))
 
         new_points,prev_points = sparse_optical_flow(prev_frame,gray,prev_points,backward_flow_threshold,optical_flow_params)
@@ -359,7 +382,13 @@ try:
             continue
         old_tpos = np.copy(tpos)
         P1 = np.dot(cam_mat,np.hstack((Rpos,old_tpos)))
-        Rpos,tpos,mask = update_motion(prev_points,new_points,Rpos,old_tpos,cam_mat,get_scale(prev_points,new_points))
+        if with_imu:
+            scale = thr2.get_speed_imu()
+            scale = abs(scale-0.1)
+            print("Speed is: {}".format(scale))
+        else:
+            scale = get_scale(prev_points,new_points)
+        Rpos,tpos,mask = update_motion(prev_points,new_points,Rpos,old_tpos,cam_mat,scale)
         if start_server:
             try:
                 thr1.send_data(tpos)
