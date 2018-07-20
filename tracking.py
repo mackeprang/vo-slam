@@ -1,3 +1,10 @@
+#####################
+### Project in VO ###
+## Mads Mackeprang ##
+##  Copyright 2018 ##
+##   DTU Denmark   ##
+#####################
+
 import cv2
 import socket
 import time
