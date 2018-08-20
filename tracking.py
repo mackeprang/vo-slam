@@ -1,3 +1,15 @@
+#####################
+### Project in VO ###
+## Mads Mackeprang ##
+##  Copyright 2018 ##
+##   DTU Denmark   ##
+##-----------------##
+## Calculate the   ##
+## movement of the ##
+## camera using a  ##
+## pi camera       ##
+#####################
+
 import cv2
 import socket
 import time

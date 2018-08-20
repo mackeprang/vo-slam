@@ -1,3 +1,13 @@
+#####################
+### Project in VO ###
+## Mads Mackeprang ##
+##  Copyright 2018 ##
+##   DTU Denmark   ##
+##-----------------##
+## To calibrate    ##
+## pi camera       ##
+#####################
+
 #  Part of this code is copied from https://docs.opencv.org/3.1.0/dc/dbb/tutorial_py_calibration.html #
 
 import cv2
