@@ -27,7 +27,7 @@ data_ready = False
 start_server = False
 with_imu = False
 threadLock = threading.Lock()
-backward_flow_threshold = 3
+backward_flow_threshold = 1
 for i, argument in enumerate(argv):
     if argument in '--verbose':
         verbose = True
@@ -49,13 +49,18 @@ for i, argument in enumerate(argv):
             print "Port number has to be between 4000 - 6000. \nUsing default portnumber: " + str(port)
     if argument in '--imu':
         with_imu = True
+    if argument in '--lmeds':
+        outlier_alg = cv2.LMEDS
+        print "Using LMEDS method"
+    else:
+        outlier_alg = cv2.RANSAC
         
 # Configuration parameters:
 camera_resolution = (320,240)
 
 good_feature_params = dict(maxCorners = 2000,
-                           qualityLevel = 0.01,
-                           minDistance = 5,
+                           qualityLevel = 0.001,
+                           minDistance = 3,
                            blockSize = 3,
                            useHarrisDetector = False)
 
@@ -283,7 +288,7 @@ def sparse_optical_flow(img1,img2,points,fb_threshold,optical_flow_params):
     return new_points,old_points
 
 def update_motion(points1,points2,Rpos,tpos,cam_mat=None,scale = 1.0):
-    E, mask = cv2.findEssentialMat(points1,points2,cameraMatrix=cam_mat,method=cv2.RANSAC,prob=0.999, mask=None)
+    E, mask = cv2.findEssentialMat(points1,points2,cameraMatrix=cam_mat,method=outlier_alg,prob=0.999, mask=None)
     newmask = np.copy(mask)
     _,R,t,newmask = cv2.recoverPose(E,points1,points2,cameraMatrix=cam_mat,mask=newmask)
     tp = tpos+np.dot(Rpos,t)*scale
@@ -384,7 +389,7 @@ try:
         P1 = np.dot(cam_mat,np.hstack((Rpos,old_tpos)))
         if with_imu:
             scale = thr2.get_speed_imu()
-            scale = abs(scale-0.1)
+            #scale = abs(scale-0.1)
             print("Speed is: {}".format(scale))
         else:
             scale = get_scale(prev_points,new_points)
